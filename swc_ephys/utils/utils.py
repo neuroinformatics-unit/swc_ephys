@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from ..data_classes.sorting import SortingData
 
 import copy
+import json
 import os.path
 import subprocess
 from pathlib import Path
@@ -410,3 +411,86 @@ def get_probe_num_groups(data: Union[PreprocessingData, SortingData]) -> int:
     """
     num_groups = np.unique(data[data.init_data_key].get_property("group")).size
     return num_groups
+
+
+# TODO: unit test this properly.
+# TODO: fix typing (why str not Union[path, str])
+def update_metadata_base_paths(
+    project_folder: Union[Path, str], old_base_path: str, new_base_path: str
+) -> None:
+    """
+    Method to change the base_path in spikeinterface
+    metadata files. SpikeInterface saves  paths to raw data
+    in .json metadata files. This can cause problems if the data is accessed
+    from a different location (e.g. mounted drive). This function
+    cycles through all known SI metadata filenames and replaces
+    the base_path on the folder path.
+
+    TODO: Note: this function is experimental! Not all spikeinterface
+    metadata formats have been investigated. This is a workaround
+    and it should be possible to do this directly in SI,
+    pending issue https://github.com/SpikeInterface/spikeinterface/issues/1752
+
+    project_folder : str
+        Folder to replace metadata files in.
+
+    param old_base_path : str
+        Old part of the path that is replaced 1:1 with `new_base_path`.
+        This is achieved with a simple str replace().
+
+    param new_base_path : str
+        New base path, which 1:1 replaces `old_base_path` in the metadata folder path.
+    """
+    project_folder = Path(project_folder)
+
+    all_metadata_paths = []
+    for filename in ["spikeinterface_recording.json", "sorting.json", "recording.json"]:
+        paths = project_folder.glob("**/" + filename)
+        all_metadata_paths.extend(list(paths))
+
+    for metadata_path in all_metadata_paths:
+        with open(metadata_path, "r") as file:
+            dict_ = json.load(file)
+
+        assert (
+            "module" in dict_ and dict_["module"] == "spikeinterface"
+        ), f"{metadata_path} is not a spikeinterface metadata file - rename this file."
+
+        if metadata_path.name in ["spikeinterface_recording.json", "recording.json"]:
+            for recording_dict in dict_["kwargs"]["recording_list"]:
+                check_and_set_spikeinterface_folder_path_metdata(
+                    recording_dict, old_base_path, new_base_path
+                )
+        else:
+            check_and_set_spikeinterface_folder_path_metdata(
+                dict_, old_base_path, new_base_path
+            )
+
+        with open(metadata_path, "w") as file:
+            json.dump(dict_, file)
+
+
+def check_and_set_spikeinterface_folder_path_metdata(
+    dict_: Dict, old_base_path: str, new_base_path: str
+):
+    """
+    Perform checks on and replace SpikeInterface metadata with
+    new_base_path. See update_metadata_base_paths().
+    """
+    folder_path = dict_["kwargs"]["folder_path"]
+
+    assert old_base_path in folder_path, (
+        f"The base path {old_base_path} was not found in the metadata folder path "
+        f"{folder_path}"
+    )
+
+    new_folder_path = dict_["kwargs"]["folder_path"].replace(
+        old_base_path, new_base_path
+    )
+
+    assert Path(new_folder_path).is_dir(), (
+        f"The new folder path does not exist. The new folder path was created by "
+        f"replacing {old_base_path} with {new_base_path} in the metadata folder path {folder_path}"
+    )
+
+    dict_["kwargs"]["folder_path"] = new_folder_path
