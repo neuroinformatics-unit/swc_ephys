@@ -1,60 +1,82 @@
+from typing import Literal
+
+import jax.numpy as jnp
 import numpy as np
-import scipy.spatial.distance as distance
-from scipy.stats.stats import pearsonr
+from jax import jit, vmap
+from jax.lax import scan
 from spikeinterface.core import compute_sparsity
-
-unit_id = 1
-data = waveforms.get_waveforms(unit_id=unit_id)
-
-num_spikes = data.shape[0]
-
-if num_spikes == 1:
-    print("only one cluster")
-    # return # or whatever
-
-sparsity = compute_sparsity(
-    waveforms, peak_sign="neg", method="radius", radius_um=75
-)  # TODO: how to determine "neg", "pos", "both", how to decide best radius
-unit_best_chan_idxs = sparsity.unit_id_to_channel_indices[unit_id]
 
 # TODO: checkout  similarity method from kilosort (see notes)
 # x = data[i, :, unit_best_chan_idxs].flatten("F")  # this will not perform well
 # without drift shifting. Could just take subset around peak.
 # y = data[i, :, unit_best_chan_idxs].flatten("F")
 
-method = "2"
-sim = np.zeros((num_spikes, num_spikes))
-for j in range(num_spikes):
-    for i in range(j + 1):
-        x = np.mean(
-            data[i, :, unit_best_chan_idxs], axis=0
-        )  # I guess this is similar to the template but per-unit.
-        y = np.mean(data[j, :, unit_best_chan_idxs], axis=0)
+# TODO: add jax, jaxlib to dependencies
+# Save some example waveforms to a PDF in the waveforms file.
 
-        # cosine
-        if method == "1":
-            sim[i, j] = np.dot(x, y.T) / (
-                np.sqrt(np.sum(x**2)) * np.sqrt(np.sum(y**2))
-            )  # TODO: unsure of this rounding error
 
-        elif method == "2":
-            sim[i, j] = np.dot(x, y.T) / np.linalg.norm(x) / np.linalg.norm(y)
+def get_waveform_similarity(
+    waveforms, unit_id, backend: Literal["numpy", "jax"] = "numpy"
+):  # TODO: where to inferface with spike window?
+    data = waveforms.get_waveforms(unit_id=unit_id)
 
-        elif method == "3":
-            sim[i, j] = 1 - distance.cosine(x, y)
+    if data.shape[0] == 1:
+        print("only one cluster")  # TODO: better
+        return  # or whatever
 
-        # corr
-        elif method == "4":
-            sim[i, j] = pearsonr(x, y).statistic
+    # TODO: how to determine "neg", "pos", "both", how to decide best radius
+    sparsity = compute_sparsity(
+        waveforms, peak_sign="neg", method="radius", radius_um=75
+    )
+    unit_best_chan_idxs = sparsity.unit_id_to_channel_indices[unit_id]
 
-        elif method == "5":
-            demean_x = x - np.mean(x)
-            demean_y = y - np.mean(y)
-            sim[i, j] = np.sum(demean_x * demean_y) / np.sqrt(
-                np.sum(demean_x**2) * np.sum(demean_y**2)
-            )
+    if backend == "numpy":
+        sim = calculate_similarity_numpy(data, unit_best_chan_idxs)
+    elif backend == "jax":
+        sim = calculate_similarity_jax(data, unit_best_chan_idxs)
 
-print(sim)
+    return sim
+
+
+@jit  # dont think this makes a difference, see Jax docs compiled under the hood anyway.
+def calculate_similarity_jax(data, unit_best_chan_idxs):
+    # This actually duplicates the upper and lower triangular,
+    # but is so fast it doesn't really matter. vmapping occurs
+    # across the entire axis so not sure it can be re-configured.
+    # Can think a bit more about this though.
+    data_mean = jnp.mean(data[:, :, unit_best_chan_idxs], axis=2)
+
+    def func(carry, i):
+        y = data_mean[i, :]
+        sim_row = vmap(
+            lambda x: jnp.dot(x, y.T) / (jnp.linalg.norm(x) * jnp.linalg.norm(y)),
+            in_axes=0,
+        )(data_mean)
+        return carry, sim_row
+
+    # TOOD: is this okay? because carry does not change. Using is to hack a loop.
+    return scan(func, data_mean, np.arange(data_mean.shape[0]))[1]
+
+
+def calculate_similarity_numpy(data, unit_best_chan_idxs):  # TODO: variable naming
+    """ """
+    num_spikes = data.shape[0]
+    data_mean = np.mean(data[:, :, unit_best_chan_idxs], axis=2)
+
+    sim = np.zeros((num_spikes, num_spikes))
+    for j in range(num_spikes):
+        for i in range(j + 1):
+            x = data_mean[i, :]
+            y = data_mean[j, :]
+
+            sim[i, j] = np.dot(x, y.T) / (np.linalg.norm(x) * np.linalg.norm(y))
+
+    i_lower = np.tril_indices(sim.shape[0], -1)
+    sim[i_lower] = sim.T[i_lower]
+
+    return sim
+
+
 # fill sim with flip
 
 # TODO
