@@ -20,7 +20,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "spikeinterface[full] @git+https://github.com/SpikeInterface/spikeinterface",
+    "spikeinterface==0.97.1",
+    # "spikeinterface[full] @git+https://github.com/SpikeInterface/spikeinterface",
     "spython",  # I think missing from SI?
     "submitit",
 ]
