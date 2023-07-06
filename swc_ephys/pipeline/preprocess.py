@@ -44,7 +44,7 @@ def preprocess(
     if not pp_steps:
         # TODO: should this ever be done? Might be
         # very confusing if user forgets to pass pp_steps
-        pp_steps, __ = configs.get_configs("test")
+        pp_steps, _, _ = configs.get_configs("test")
 
     pp_funcs = get_pp_funcs()
 
