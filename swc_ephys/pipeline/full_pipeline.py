@@ -87,7 +87,7 @@ def run_full_pipeline(
         return
     assert slurm_batch is False, "SLURM run has slurm_batch set True"
 
-    pp_steps, sorter_options = get_configs(config_name)
+    pp_steps, sorter_options, waveform_options = get_configs(config_name)
 
     preprocess_data = load_spikeglx_data(base_path, sub_name, run_names)
 
@@ -106,7 +106,12 @@ def run_full_pipeline(
     # Save spikeinterface 'waveforms' output (TODO: currently, this is large)
     # to the sorter output dir. Quality checks are run and .csv of checks
     # output in the sorter folder as quality_metrics.csv
-    run_postprocess(sorting_data.preprocessed_data_path, sorter, verbose)
+    run_postprocess(
+        sorting_data.preprocessed_data_path,
+        sorter,
+        verbose,
+        waveform_options=waveform_options,
+    )
 
 
 def save_preprocessed_data_if_required(
