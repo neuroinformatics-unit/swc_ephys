@@ -123,7 +123,7 @@ def save_plots_of_templates(waveforms_output_path, waveforms):
         waveforms, peak_sign="neg", method="radius", radius_um=75
     )
 
-    for unit_id in range(all_templates.shape[0]):
+    for unit_id in waveforms.sorting.get_unit_ids():
         unit_best_chan_idxs = sparsity.unit_id_to_channel_indices[unit_id]
         idx = np.argmin(np.mean(all_templates[unit_id, :, unit_best_chan_idxs], axis=1))
 
@@ -162,7 +162,9 @@ def load_sorting_output(sorting_data: SortingData, sorter: str) -> BaseSorting:
     recording = sorting_data[sorting_data.init_data_key]
 
     sorting = KiloSortSortingExtractor(
-        folder_path=sorting_data.sorter_run_output_path, keep_good_only=False
+        folder_path=sorting_data.sorter_run_output_path,
+        keep_good_only=False,
+        remove_empty_units=False,
     )
 
     sorting.remove_empty_units()  # TODO: use upcoming SI option, see https://github.com/SpikeInterface/spikeinterface/issues/1760
