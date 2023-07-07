@@ -25,29 +25,6 @@ from ..pipeline.load_data import load_data_for_sorting
 from ..utils import utils
 from .waveform_compare import get_waveform_similarity
 
-# TODO: for waveforms, consider!!: get_template_extremum_channel()
-# TODO: need to do some validation if waveforms already exists.... 3500 might be
-#  too big a default.
-
-# fill sim with flip
-# TODO: save quality_metrics.csv and unit_locations to waveform?
-# TODO
-# 1) read quality metrics
-# 2) profile with larger clusters
-# 3) use Jax for fun
-# 4) think - what exactly do we want from waveform comparison in the current use-case? (noise, low sampling rate)
-# 5) Package up
-# 6) Talk to steve, submit to SI?
-
-
-# Then can plot these next to spike times. Can also smooth other these
-# thing of other ML or probabilistic ways to capture this information.
-# array([  7876, 158707, 176768, 176987, 181303, 210568])
-# waveforms.sorting.get_unit_spike_train
-
-# gonna have to handle 'channel' and 'shank'
-# can get sorter when loading waveform?!?!  need it for spike times. DOn't necessarily need this.s
-
 
 def run_postprocess(
     sorting_data: Union[Path, str, SortingData],
@@ -65,6 +42,7 @@ def run_postprocess(
     sorting_data : Union[Path, str, SortingData]
         The path to the 'preprocessed' folder in the subject / run
         folder used for sorting or a SortingData object. If a
+
         SortingData object, the path will be read from the
         `preprocessed_data_path` attribute.
 
@@ -75,13 +53,15 @@ def run_postprocess(
         If True, messages will be printed to console updating on the
         progress of preprocessing / sorting.
     """
+    # Load sorting
     if not isinstance(sorting_data, SortingData):
         sorting_data = load_data_for_sorting(
             Path(sorting_data),
         )
     assert isinstance(sorting_data, SortingData), "type narrow `sorting_data`."
 
-    if waveform_options is None:  # TODO: make test defaults clear and canonical
+    # Create / load waveforms
+    if waveform_options is None:
         _, _, waveform_options = get_configs("test")
 
     sorting_data.set_sorter_output_paths(sorter)
@@ -111,11 +91,9 @@ def run_postprocess(
 
         waveforms = si.load_waveforms(sorting_data.waveforms_output_path)
 
-    # TODO: use SI sparse waveforms?
     save_plots_of_templates(sorting_data.waveforms_output_path, waveforms)
 
-    # Postprocessing Outputs
-    # TODO: API confusing and messy here, refactor for consistency
+    # Perform postprocessing
     quality_metrics = si.qualitymetrics.compute_quality_metrics(waveforms)
     quality_metrics.to_csv(sorting_data.quality_metrics_path)
 
@@ -134,27 +112,35 @@ def run_postprocess(
 
 
 def save_plots_of_templates(waveforms_output_path, waveforms):
+    """ """
     t = time.perf_counter()
 
-    all_templates = waveforms.get_all_templates()
-    fs = waveforms.recording.get_sampling_frequency()
-    n_samples = all_templates.shape[1]
+    fs = waveforms.sampling_frequency
+    n_samples = waveforms.nsamples
     time_ = np.arange(n_samples) / fs * 1000
 
-    sparsity = compute_sparsity(  # TODO: own function / merge with waveform similarity
+    sparsity = compute_sparsity(
         waveforms, peak_sign="neg", method="radius", radius_um=75
     )
 
     for idx, unit_id in enumerate(waveforms.sorting.get_unit_ids()):
+        unit_template = waveforms.get_template(unit_id)
         unit_best_chan_idxs = sparsity.unit_id_to_channel_indices[unit_id]
-        # TODO: test this will never come out of alignment
-        idx = np.argmin(np.mean(all_templates[idx, :, unit_best_chan_idxs], axis=1))
 
-        plt.plot(time_, all_templates[idx, :, unit_best_chan_idxs[idx]])
-        plt.plot(time_, np.mean(all_templates[idx, :, unit_best_chan_idxs], axis=0))
+        # TODO: own function
+        # TODO: why are some templates all zeros?
+        # if unit_id in [33, "33"]:
+        #    breakpoint()
+        plt.plot(time_, np.mean(unit_template[:, unit_best_chan_idxs], axis=1))
+
+        peak_chan_idx = np.argmin(
+            np.mean(unit_template[:, unit_best_chan_idxs], axis=0)
+        )
+        plt.plot(time_, unit_template[:, unit_best_chan_idxs[peak_chan_idx]])
+
         plt.legend(["max signal channel", "mean across best channels"])
         plt.xlabel("Time (ms)")
-        plt.ylabel("TODO: check units (Vm, mV?")
+        plt.ylabel("Voltage (uV)")
         plt.title(f"Unit {unit_id} Template")
 
         output_folder = waveforms_output_path / "images"
@@ -162,7 +148,7 @@ def save_plots_of_templates(waveforms_output_path, waveforms):
         plt.savefig(waveforms_output_path / "images" / f"unit_{unit_id}.png")
         plt.clf()
 
-    print(f"Saving plots of tempaltes took: {time.perf_counter() - t}")
+    print(f"Saving plots of templates took: {time.perf_counter() - t}")
 
 
 def load_sorting_output(sorting_data: SortingData, sorter: str) -> BaseSorting:
@@ -189,9 +175,9 @@ def load_sorting_output(sorting_data: SortingData, sorter: str) -> BaseSorting:
         keep_good_only=False,
     )
 
-    sorting = (
-        sorting.remove_empty_units()
-    )  # TODO: use upcoming SI option, see https://github.com/SpikeInterface/spikeinterface/issues/1760
+    # TODO: use upcoming SI option, see
+    #  https://github.com/SpikeInterface/spikeinterface/issues/1760
+    sorting = sorting.remove_empty_units()
     sorting_without_excess_spikes = curation.remove_excess_spikes(sorting, recording)
 
     return sorting_without_excess_spikes
@@ -205,10 +191,8 @@ def save_waveform_similarities(waveforms_output_path, waveforms):
     for unit_id in waveforms.sorting.get_unit_ids():
         sim_matrix, spike_times = get_waveform_similarity(waveforms, unit_id, "jax")
 
-        print(spike_times[-1])
-
         sim_matrix_pd = pd.DataFrame(sim_matrix, columns=spike_times, index=spike_times)
         sim_matrix_pd.to_csv(out_path / f"waveform_similarity_unit_{unit_id}.csv")
 
     # TODO: use message utils
-    print(f"Saving wavefor similarities took: {time.perf_counter()} - t")
+    print(f"Saving waveform similarities took: {time.perf_counter()} - t")
