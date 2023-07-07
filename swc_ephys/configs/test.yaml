@@ -21,3 +21,9 @@
   'kilosort3':
     'car': False
     'freq_min': 300
+
+'waveforms':
+  'ms_before': 2
+  'ms_after': 2
+  'max_spikes_per_unit': 500
+  'return_scaled': False
